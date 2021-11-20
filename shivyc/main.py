@@ -14,6 +14,7 @@ from shivyc.parser.parser import parse
 from shivyc.il_gen import ILCode, SymbolTable, Context
 from shivyc.asm_gen import ASMCode, ASMGen
 
+from traceback_with_variables import activate_by_import
 
 def main():
     """Run the main compiler script."""
@@ -33,6 +34,8 @@ def main():
     if any(not obj for obj in objs):
         return 1
     else:
+        if arguments.asm_only:
+            return 0
         if not link("out", objs):
             err = "linker returned non-zero status"
             print(CompilerError(err))
@@ -78,6 +81,23 @@ def process_c_file(file, args):
     ast_root.make_il(il_code, symbol_table, Context())
     if not error_collector.ok():
         return None
+    
+    # for fname, fcmds in il_code.commands.items():
+    #     print(f'Function {fname}:')
+    #     for cmd in fcmds:
+    #         print(f'  {cmd}')
+
+    for var, varname in symbol_table.names.items():
+        print(f'Var {var}: {varname:16s}', end='')
+        for dn in ["linkage_type", "linkages", "def_state", "storage"]:
+            d = getattr(symbol_table, dn)
+            try:
+                dv = d[var]
+            except KeyError:
+                continue
+            print(f'{dn}={dv} ', end='')
+        print()
+
 
     asm_code = ASMCode()
     ASMGen(il_code, symbol_table, asm_code, args).make_asm()
@@ -91,6 +111,8 @@ def process_c_file(file, args):
     write_asm(asm_source, asm_file)
     if not error_collector.ok():
         return None
+    if args.asm_only:
+        return asm_file
 
     assemble(asm_file, obj_file)
     if not error_collector.ok():
@@ -118,6 +140,10 @@ def get_arguments():
     parser.add_argument("-z-reg-alloc-perf",
                         help="display register allocator performance info",
                         dest="show_reg_alloc_perf", action="store_true")
+
+    parser.add_argument("-S",
+                        help="output assembly instead of object code",
+                        dest="asm_only", action="store_true")
 
     return parser.parse_args()
 

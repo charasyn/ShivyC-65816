@@ -190,3 +190,6 @@ class Sar(_ASMCommandMultiSize): name = "sar"  # noqa: D101
 
 
 class Sal(_ASMCommandMultiSize): name = "sal"  # noqa: D101
+
+
+class Rep(_ASMCommand): name = "rep"  # noqa: D101

@@ -187,9 +187,10 @@ class PointerCType(CType):
 
     """
 
-    def __init__(self, arg, const=False):
+    def __init__(self, arg, const=False, nearness=None):
         """Initialize type."""
         self.arg = arg
+        self.nearness = nearness
         super().__init__(8, const)
 
     def weak_compat(self, other):
@@ -390,15 +391,16 @@ unsig_char_max = 255
 short = IntegerCType(2, True)
 unsig_short = IntegerCType(2, False)
 
-integer = IntegerCType(4, True)
-unsig_int = IntegerCType(4, False)
-int_max = 2147483647
-int_min = -2147483648
+integer = short
+unsig_int = unsig_short
+int_max = 32767
+int_min = -32768
 
-longint = IntegerCType(8, True)
-unsig_longint = IntegerCType(8, False)
-long_max = 9223372036854775807
-long_min = -9223372036854775808
+longint = IntegerCType(4, True)
+unsig_longint = IntegerCType(4, False)
+long_max = 2147483647
+long_min = -2147483648
+
 
 
 simple_types = {token_kinds.void_kw: void,

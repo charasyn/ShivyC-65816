@@ -910,7 +910,7 @@ class _ArithUnOp(_RExprNode):
             err = f"{self.descrip} requires {self.opnd_descrip} type operand"
             raise CompilerError(err, self.expr.r)
         # perform integer promotion
-        if expr.ctype.size < 4:
+        if expr.ctype.size < 2:
             expr = set_type(expr, ctypes.integer, il_code)
         if self.cmd:
             out = ILValue(expr.ctype)

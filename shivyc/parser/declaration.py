@@ -358,7 +358,8 @@ def _find_decl_end(index):
     """
     if (token_is(index, token_kinds.star) or
          token_is(index, token_kinds.identifier) or
-         token_is(index, token_kinds.const_kw)):
+         token_is(index, token_kinds.const_kw) or
+         token_in(index, (token_kinds.near_kw, token_kinds.far_kw))):
         return _find_decl_end(index + 1)
     elif token_is(index, token_kinds.open_paren):
         close = _find_pair_forward(index)
@@ -385,8 +386,17 @@ def _parse_declarator(start, end, is_typedef):
     return decl
 
 
-def _parse_declarator_raw(start, end, is_typedef):
+def _parse_declarator_raw(start, end, is_typedef) -> decl_nodes.DeclNode:
     """Like _parse_declarator, but doesn't add `.r` range attribute."""
+
+    nearness_kws = (token_kinds.near_kw, token_kinds.far_kw)
+    def parse_pointer(start, nearness=None):
+        if p.tokens[start].kind != token_kinds.star:
+            raise_error("expected pointer definition", start, ParserError.AT)
+        const, index = _find_const(start + 1)
+        return decl_nodes.Pointer(
+            _parse_declarator(index, end, is_typedef), const, nearness)
+
 
     if start == end:
         return decl_nodes.Identifier(None)
@@ -395,11 +405,12 @@ def _parse_declarator_raw(start, end, is_typedef):
            p.tokens[start].kind == token_kinds.identifier):
         p.symbols.add_symbol(p.tokens[start], is_typedef)
         return decl_nodes.Identifier(p.tokens[start])
+    
+    elif p.tokens[start].kind in nearness_kws:
+        return parse_pointer(start + 1, p.tokens[start].kind)
 
     elif p.tokens[start].kind == token_kinds.star:
-        const, index = _find_const(start + 1)
-        return decl_nodes.Pointer(
-            _parse_declarator(index, end, is_typedef), const)
+        return parse_pointer(start)
 
     func_decl = _try_parse_func_decl(start, end, is_typedef)
     if func_decl: return func_decl

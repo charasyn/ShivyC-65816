@@ -115,7 +115,7 @@ class ILCommand:
         """Return list of any labels to which this command may jump."""
         return []
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):
         """Generate assembly code for this command.
 
         spotmap - Dictionary mapping every input and output ILValue to a spot.
@@ -148,3 +148,6 @@ class ILCommand:
         return (isinstance(spot, LiteralSpot) and
                 (int(spot.detail) > ctypes.int_max or
                  int(spot.detail) < ctypes.int_min))
+
+    def __repr__(self) -> str:
+        return f'{type(self).__name__}({self.inputs()} ==> {self.outputs()})'

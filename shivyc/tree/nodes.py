@@ -418,7 +418,7 @@ class DeclInfo:
             arg = symbol_table.add_variable(
                 param, ctype, symbol_table.DEFINED, None,
                 symbol_table.AUTOMATIC)
-            il_code.add(value_cmds.LoadArg(arg, i))
+            il_code.add(value_cmds.LoadArg(arg, i, ctype.size))
 
         self.body.make_il(il_code, symbol_table, c, no_scope=True)
         if not il_code.always_returns() and is_main:
@@ -567,7 +567,7 @@ class Declaration(Node):
         current one.
         """
         if isinstance(decl, decl_nodes.Pointer):
-            new_ctype = PointerCType(prev_ctype, decl.const)
+            new_ctype = PointerCType(prev_ctype, decl.const, decl.nearness)
         elif isinstance(decl, decl_nodes.Array):
             new_ctype = self._generate_array_ctype(decl, prev_ctype)
         elif isinstance(decl, decl_nodes.Function):

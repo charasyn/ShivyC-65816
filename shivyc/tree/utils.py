@@ -180,7 +180,7 @@ class RelativeLValue(LValue):
         # `sizes`, we don't need to emit a SET command.
         resized_count = set_type(self.count, ctypes.longint, il_code)
 
-        sizes = [8, 4, 2, 1]
+        sizes = [4, 2, 1]
         if self.chunk in sizes:
             self.fixed_chunk, self.fixed_count = self.chunk, resized_count
             return

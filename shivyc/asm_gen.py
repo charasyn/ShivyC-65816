@@ -1,8 +1,14 @@
 """Objects for the IL->ASM stage of the compiler."""
 
 import itertools
+from os import get_inheritable
+from typing import Dict, List
 
 import shivyc.asm_cmds as asm_cmds
+from shivyc.il_cmds.value import LoadArg
+from shivyc.il_cmds.control import Call
+from shivyc.il_gen import ILValue
+from shivyc.reg_alloc import determine_calling_convention
 import shivyc.spots as spots
 from shivyc.spots import Spot, RegSpot, MemSpot, LiteralSpot
 
@@ -38,7 +44,7 @@ class ASMCode:
     def get_label():
         """Return a unique label string."""
         ASMCode.label_num += 1
-        return f"__shivyc_label{ASMCode.label_num}"
+        return f"@_shivyc_label{ASMCode.label_num}"
 
     def add_global(self, name):
         """Add a name to the code as global.
@@ -96,6 +102,14 @@ class ASMCode:
 
         return "\n".join(header + ["\t.att_syntax noprefix", ""])
 
+def fprintdecorator(func):
+    def returned(*args, **kwargs):
+        print('=' * 50)
+        print('Calling', func.__name__, '...')
+        print('Args:', str(args))
+        print('Kwargs:', str(kwargs))
+        func(*args, **kwargs)
+    return returned
 
 class NodeGraph:
     """Graph storing conflict and preference information.
@@ -117,6 +131,18 @@ class NodeGraph:
         self._all_nodes = self._real_nodes[:]
         self._conf = {n: [] for n in self._all_nodes}
         self._pref = {n: [] for n in self._all_nodes}
+
+    def consistency(self):
+        for n1, n1l in self._conf.items():
+            assert n1 is not None
+            for n2 in n1l:
+                assert n2 is not None
+                assert n1 in self._conf[n2]
+        for n1, n1l in self._pref.items():
+            assert n1 is not None
+            for n2 in n1l:
+                assert n2 is not None
+                assert n1 in self._pref[n2]
 
     def is_node(self, n):
         """Check whether given node is in the graph."""
@@ -256,7 +282,7 @@ class ASMGen:
     il_code (ILCode) - IL code to convert to ASM.
     asm_code (ASMCode) - ASMCode object to populate with ASM.
     arguments - Arguments passed via command line.
-    offset (int) - Current offset from RBP for allocating on stack
+    offset (int) - Current offset in direct page for allocating on stack
 
     """
 
@@ -273,7 +299,7 @@ class ASMGen:
         self.asm_code = asm_code
         self.arguments = arguments
 
-        self.offset = 0
+        self.offset = 0x0e
 
     def make_asm(self):
         """Generate ASM code."""
@@ -284,6 +310,10 @@ class ASMGen:
 
     def _make_asm(self, commands, global_spotmap):
         """Generate ASM code for given command list."""
+
+        # Annotate calling convention in LoadArg commands
+        # Must be done before generate_graph
+        self._annotate_calling_convention(commands)
 
         # Get free values
         free_values = self._get_free_values(commands, global_spotmap)
@@ -301,8 +331,18 @@ class ASMGen:
         # In addition, move all IL values of strange size to memory because
         # they won't fit in a register.
         for v in free_values:
-            if v.ctype.size not in {1, 2, 4, 8}:
+            if v.ctype.size not in {1, 2}:
                 move_to_mem.append(v)
+
+        # # Move all variables to memory
+        # move_to_mem: List[ILValue] = []
+        # for command in commands:
+        #     refs = command.references().values()
+        #     for line in refs:
+        #         for v in line:
+        #             if v not in refs:
+        #                 move_to_mem.append(v)
+        # move_to_mem += free_values
 
         # TODO: All non-free IL values are automatically assigned distinct
         # memory spots. However, this is very inoptimal for structs.
@@ -324,8 +364,7 @@ class ASMGen:
         # same spot before trying to do a copy.
         for v in move_to_mem:
             if v in free_values:
-                self.offset += v.ctype.size
-                global_spotmap[v] = MemSpot(spots.RBP, -self.offset)
+                global_spotmap[v] = self._allocate_stack(v.ctype.size)
                 free_values.remove(v)
 
         # Perform liveliness analysis
@@ -335,6 +374,10 @@ class ASMGen:
         g_bak = self._generate_graph(commands, free_values, live_vars)
 
         spilled_nodes = []
+
+        # removed_nodes = []
+        # merged_nodes = {}
+        # g = g_bak.copy()
 
         while True:
             g = g_bak.copy()
@@ -380,11 +423,11 @@ class ASMGen:
 
         # Pop values off the stack to generate spot assignments.
         spotmap = self._generate_spotmap(removed_nodes, merged_nodes, g_bak)
+        # spotmap: Dict[ILValue, spots.Spot] = {}
 
         # Assign stack values to the spilled nodes
         for v in spilled_nodes:
-            self.offset += v.ctype.size
-            spotmap[v] = MemSpot(spots.RBP, -self.offset)
+            spotmap[v] = self._allocate_stack(v.ctype.size)
 
         # Merge global spotmap into this spotmap
         for v in global_spotmap:
@@ -479,7 +522,7 @@ class ASMGen:
 
             return MemSpot(name)
 
-    def _get_free_values(self, commands, global_spotmap):
+    def _get_free_values(self, commands, global_spotmap) -> List[ILValue]:
         """Generate list of free values.
 
         Returns a list of the free values, the variables which need
@@ -781,20 +824,66 @@ class ASMGen:
 
         return spotmap
 
+    def _annotate_calling_convention(self, commands):
+        """Annotate all call commands with the spot used for their parameter's passing"""
+        self._annotate_calling_convention_loadarg(commands)
+        self._annotate_calling_convention_call(commands)
+
+    def _annotate_calling_convention_loadarg(self, commands):
+        """Annotate LoadArg commands with the spot used for their parameter's passing"""
+        commands_by_arg_index: Dict[int, LoadArg] = {}
+        for cmd in (cmd for cmd in commands if isinstance(cmd, LoadArg)):
+            commands_by_arg_index[cmd.arg_num] = cmd
+        param_sizes = []
+        for arg_i in range(len(commands_by_arg_index)):
+            assert arg_i in commands_by_arg_index
+            param_sizes.append(commands_by_arg_index[arg_i].arg_size)
+        param_spots = determine_calling_convention(param_sizes)
+        for i, spot in enumerate(param_spots):
+            cmd = commands_by_arg_index[i]
+            cmd.arg_reg = spot
+
+    def _annotate_calling_convention_call(self, commands):
+        """Annotate Call commands with the spot used for their parameter's passing"""
+        for cmd in (cmd for cmd in commands if isinstance(cmd, Call)):
+            param_sizes = [v.ctype.size for v in cmd.args]
+            param_spots = determine_calling_convention(param_sizes)
+            for i, spot in enumerate(param_spots):
+                if isinstance(spot, spots.ParentDPRelativeSpot):
+                    newspot = spots.MemSpot(spots.DP, spot.offset)
+                    param_spots[i] = newspot
+            cmd.arg_spots = param_spots
+
+    def _allocate_stack(self, size):
+        ret = MemSpot(spots.DP, self.offset)
+        self.offset += size
+        return ret
+
     def _generate_asm(self, commands, live_vars, spotmap):
         """Generate assembly code."""
 
         # This is kinda hacky...
-        max_offset = max(spot.rbp_offset() for spot in spotmap.values())
-        if max_offset % 16 != 0:
-            max_offset += 16 - max_offset % 16
+        # max_offset = max(spot.dp_offset() + 8 for spot in spotmap.values())
+        stack_size = self.offset
+        # if max_offset % 16 != 0:
+        #     max_offset += 16 - max_offset % 16
 
+        # Generate prologue:
         # Back up rbp and move rsp
-        self.asm_code.add(asm_cmds.Push(spots.RBP, None, 8))
-        self.asm_code.add(asm_cmds.Mov(spots.RBP, spots.RSP, 8))
+        self.asm_code.add(asm_cmds.Rep(LiteralSpot("$31")))
+        self.asm_code.add(asm_cmds.Push(spots.DP, None, 2))
+        a_is_parameter = bool([cmd for cmd in commands if isinstance(cmd, LoadArg) and cmd.arg_reg == spots.A])
+        if a_is_parameter:
+            self.asm_code.add(asm_cmds.Push(spots.A, None, 2))
+        self.asm_code.add(asm_cmds.Mov(spots.A, spots.DP, 2))
+        add_to_stack = LiteralSpot(str(-stack_size))
+        self.asm_code.add(asm_cmds.Add(spots.A, add_to_stack, 2))
+        self.asm_code.add(asm_cmds.Mov(spots.DP, spots.A, 2))
+        if a_is_parameter:
+            self.asm_code.add(asm_cmds.Pop(spots.A, None, 2))
 
-        offset_spot = LiteralSpot(str(max_offset))
-        self.asm_code.add(asm_cmds.Sub(spots.RSP, offset_spot, 8))
+        # self.asm_code.add(asm_cmds.Mov(spots.RBP, spots.RSP, 8))
+
 
         # Generate code for each command
         for i, command in enumerate(commands):
@@ -820,6 +909,19 @@ class ASMGen:
                     if isinstance(s, RegSpot) and s not in bad_spots:
                         return s
 
-                raise NotImplementedError("spill required for get_reg")
+                # Something has to be pushed onto the stack
+                raise NotImplementedError
+                # Lmao I have no idea if this works
+                reg = spots.A
+                reg_var = None
+                for var in live_vars[i][0]:
+                    if spotmap[var] == reg:
+                        reg_var = var
+                if reg_var:
+                    temp_storage_spot = MemSpot(spots.DP, self.offset)
+                    self.offset += 2
+                    self.asm_code.add(asm_cmds.Mov(temp_storage_spot, reg, 2))
+                    spotmap[reg_var] = temp_storage_spot
+                return reg
 
-            command.make_asm(spotmap, spotmap, get_reg, self.asm_code)
+            command.make_asm(spotmap, spotmap, get_reg, self.asm_code, stack_size=stack_size)

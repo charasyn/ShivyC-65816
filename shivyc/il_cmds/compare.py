@@ -79,7 +79,7 @@ class _GeneralCmp(ILCommand):
         else:
             return arg1_spot, arg2_spot
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):  # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):  # noqa D102
         regs = []
 
         result = get_reg([spotmap[self.output]],

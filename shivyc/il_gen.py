@@ -2,6 +2,7 @@
 
 from collections import namedtuple
 from copy import copy
+from typing import Union
 
 from shivyc.ctypes import CType
 import shivyc.il_cmds.control as control_cmds
@@ -113,13 +114,15 @@ class ILValue:
     ILCode.register_literal_var function.
     """
 
-    def __init__(self, ctype):
+    def __init__(self, ctype: CType):
         """Initialize IL value."""
-        self.ctype = ctype
-        self.literal = None
+        self.ctype: CType = ctype
+        self.literal: _Literal = None
 
     def __str__(self):  # pragma: no cover
-        return f'{id(self) % 1000:03}'
+        if self.literal is not None:
+            return f'{self.literal}'
+        return f'var_{id(self) & 0xfff:03X}'
 
     def __repr__(self):  # pragma: no cover
         return str(self)
@@ -129,6 +132,8 @@ class _Literal:
     """Base class for integer literals, string literals, etc."""
     def __init__(self, val):
         self.val = val
+    def __str__(self) -> str:
+        return f'{type(self).__name__}({self.val})'
 
 
 class IntegerLiteral(_Literal):

@@ -30,6 +30,8 @@ union_kw = TokenKind("union", keyword_kinds)
 const_kw = TokenKind("const", keyword_kinds)
 typedef_kw = TokenKind("typedef", keyword_kinds)
 sizeof_kw = TokenKind("sizeof", keyword_kinds)
+near_kw = TokenKind("near", keyword_kinds)
+far_kw = TokenKind("far", keyword_kinds)
 
 plus = TokenKind("+", symbol_kinds)
 minus = TokenKind("-", symbol_kinds)

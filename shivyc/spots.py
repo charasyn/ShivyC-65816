@@ -36,14 +36,14 @@ class Spot:
         """
         raise NotImplementedError
 
-    def rbp_offset(self):
-        """Return this spot's offset from RBP.
+    def dp_offset(self):
+        """Return this spot's offset from the DP stack.
 
-        If this is a memory spot which resides at a certain negative offset
-        away from RBP, then return that offset. This is used by the register
+        If this is a memory spot which resides at a certain offset
+        from DP, then return that offset. This is used by the register
         allocator to figure out how much memory to allocate for this spot.
 
-        If this is not a memory spot relative to RBP, just return 0.
+        If this is not a memory spot relative to DP, just return 0.
         """
         return 0
 
@@ -58,7 +58,7 @@ class Spot:
         return self
 
     def __repr__(self):  # pragma: no cover
-        return self.detail
+        return str(self.detail)
 
     def __eq__(self, other):
         """Test equality by comparing Spot type and detail."""
@@ -78,18 +78,11 @@ class RegSpot(Spot):
     # Mapping from the 64-bit register name to the 64-bit, 32-bit, 16-bit,
     # and 8-bit register names for each register.
     # TODO: Do I need rex prefix on any of the 8-bit?
-    reg_map = {"rax": ["rax", "eax", "ax", "al"],
-               "rbx": ["rbx", "ebx", "bx", "bl"],
-               "rcx": ["rcx", "ecx", "cx", "cl"],
-               "rdx": ["rdx", "edx", "dx", "dl"],
-               "rsi": ["rsi", "esi", "si", "sil"],
-               "rdi": ["rdi", "edi", "di", "dil"],
-               "r8": ["r8", "r8d", "r8w", "r8b"],
-               "r9": ["r9", "r9d", "r9w", "r9b"],
-               "r10": ["r10", "r10d", "r10w", "r10b"],
-               "r11": ["r11", "r11d", "r11w", "r11b"],
-               "rbp": ["rbp", "", "", ""],
-               "rsp": ["rsp", "", "", ""]}
+    reg_map = {"A": ["A", "A", "A", "A"],
+               "X": ["X", "X", "X", "X"],
+               "Y": ["Y", "Y", "Y", "Y"],
+               "DP": ["DP", "", "DP", ""],
+               "SP": ["SP", "", "SP", ""]}
 
     def __init__(self, name):
         """Initialize this spot.
@@ -164,8 +157,8 @@ class MemSpot(Spot):
         return f"{size_desc}[{final}]"
 
     def rbp_offset(self):  # noqa D102
-        if self.base == RBP:
-            return -self.offset
+        if self.base == DP:
+            return self.offset
         else:
             return 0
 
@@ -192,6 +185,17 @@ class MemSpot(Spot):
         return MemSpot(self.base, new_offset, new_chunk, new_count)
 
 
+class ParentDPRelativeSpot(Spot):
+    """Spot representing a location in the parent's stack frame."""
+
+    def __init__(self, offset):
+        super().__init__(offset)
+        self.offset = offset
+
+    def asm_str(self, size):  # noqa D102
+        return str(f"PARENT_DP+{self.offset}")
+    
+
 class LiteralSpot(Spot):
     """Spot representing a literal value.
 
@@ -207,21 +211,17 @@ class LiteralSpot(Spot):
     def asm_str(self, size):  # noqa D102
         return str(self.value)
 
+A = RegSpot("A")
+X = RegSpot("X")
+Y = RegSpot("Y")
+registers = [A, X, Y]
 
-# RBX is callee-saved, which is still unsupported
-# RBX = RegSpot("rbx")
+DP = RegSpot("DP")
+SP = RegSpot("SP")
 
-RAX = RegSpot("rax")
-RCX = RegSpot("rcx")
-RDX = RegSpot("rdx")
-RSI = RegSpot("rsi")
-RDI = RegSpot("rdi")
-R8 = RegSpot("r8")
-R9 = RegSpot("r9")
-R10 = RegSpot("r10")
-R11 = RegSpot("r11")
-
-registers = [RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11]
-
-RBP = RegSpot("rbp")
-RSP = RegSpot("rsp")
+DP00 = MemSpot(DP, offset=0x00)
+DP01 = MemSpot(DP, offset=0x01)
+DP02 = MemSpot(DP, offset=0x02)
+DP04 = MemSpot(DP, offset=0x04)
+DP06 = MemSpot(DP, offset=0x06)
+DP0A = MemSpot(DP, offset=0x0A)

@@ -30,6 +30,9 @@ class _ValueCmd(ILCommand):
         """
         # TODO: consider padding everything to 8 bytes to reduce the
         # number of mov operations emitted for struct copying.
+        if size > 8:
+            # Emit memcpy
+            pass
         shift = 0
         while shift < size:
             reg_size = self._reg_size(size - shift)
@@ -48,7 +51,7 @@ class _ValueCmd(ILCommand):
 
     def _reg_size(self, size):
         """Return largest register size that does not overfit given size."""
-        reg_sizes = [8, 4, 2, 1]
+        reg_sizes = [2, 1]
         for reg_size in reg_sizes:
             if size >= reg_size:
                 return reg_size
@@ -71,11 +74,12 @@ class LoadArg(ILCommand):
     in order to load the first function argument into the variable a and
     the second function argument into the variable b.
     """
-    arg_regs = [spots.RDI, spots.RSI, spots.RDX, spots.RCX, spots.R8, spots.R9]
 
-    def __init__(self, output, arg_num):
+    def __init__(self, output, arg_num, size):
         self.output = output
-        self.arg_reg = self.arg_regs[arg_num]
+        self.arg_num = arg_num
+        self.arg_size = size
+        self.arg_reg = None # will be set by annotate_calling_convention
 
     def inputs(self):
         return []
@@ -89,7 +93,7 @@ class LoadArg(ILCommand):
     def abs_spot_pref(self):
         return {self.output: [self.arg_reg]}
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):
         if spotmap[self.output] == self.arg_reg:
             return
         else:
@@ -128,7 +132,7 @@ class Set(_ValueCmd):
         else:
             return {}
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code): # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs): # noqa D102
         if self.output.ctype.weak_compat(ctypes.bool_t):
             return self._set_bool(spotmap, get_reg, asm_code)
 
@@ -220,7 +224,7 @@ class AddrOf(ILCommand):
     def references(self):  # noqa D102
         return {self.output: [self.var]}
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):  # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):  # noqa D102
         r = get_reg([spotmap[self.output]])
         asm_code.add(asm_cmds.Lea(r, home_spots[self.var]))
 
@@ -249,7 +253,7 @@ class ReadAt(_ValueCmd):
     def indir_read(self):  # noqa D102
         return [self.addr]
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):  # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):  # noqa D102
         addr_spot = spotmap[self.addr]
         output_spot = spotmap[self.output]
 
@@ -289,7 +293,7 @@ class SetAt(_ValueCmd):
     def indir_write(self):  # noqa D102
         return [self.addr]
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):  # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):  # noqa D102
         addr_spot = spotmap[self.addr]
         value_spot = spotmap[self.val]
 
@@ -400,7 +404,7 @@ class SetRel(_RelCommand):
     def references(self):  # noqa D102
         return {None: [self.base]}
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):  # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):  # noqa D102
         if not isinstance(spotmap[self.base], MemSpot):
             raise NotImplementedError("expected base in memory spot")
 
@@ -430,7 +434,7 @@ class AddrRel(_RelCommand):
     def references(self):  # noqa D102
         return {self.output: [self.base]}
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):  # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):  # noqa D102
         if not isinstance(spotmap[self.base], MemSpot):
             raise NotImplementedError("expected base in memory spot")
 
@@ -462,7 +466,7 @@ class ReadRel(_RelCommand):
     def references(self):  # noqa D102
         return {None: [self.base]}
 
-    def make_asm(self, spotmap, home_spots, get_reg, asm_code):  # noqa D102
+    def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs):  # noqa D102
         if not isinstance(spotmap[self.base], MemSpot):
             raise NotImplementedError("expected base in memory spot")
 
