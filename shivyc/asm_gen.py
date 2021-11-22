@@ -8,6 +8,7 @@ import shivyc.asm_cmds as asm_cmds
 from shivyc.il_cmds.value import LoadArg
 from shivyc.il_cmds.control import Call
 from shivyc.il_gen import ILValue
+from shivyc.ilpeep import perform_il_peephole
 from shivyc.reg_alloc import determine_calling_convention
 import shivyc.spots as spots
 from shivyc.spots import Spot, RegSpot, MemSpot, LiteralSpot
@@ -41,7 +42,7 @@ class ASMCode:
     label_num = 0
 
     @staticmethod
-    def get_label():
+    def get_label() -> str:
         """Return a unique label string."""
         ASMCode.label_num += 1
         return f"@_shivyc_label{ASMCode.label_num}"
@@ -299,17 +300,22 @@ class ASMGen:
         self.asm_code = asm_code
         self.arguments = arguments
 
-        self.offset = 0x0e
-
     def make_asm(self):
         """Generate ASM code."""
         global_spotmap = self._get_global_spotmap()
         for func in self.il_code.commands:
+            self.offset = 0x0e
             self.asm_code.add(asm_cmds.Label(func))
             self._make_asm(self.il_code.commands[func], global_spotmap)
 
     def _make_asm(self, commands, global_spotmap):
         """Generate ASM code for given command list."""
+        
+        # Perform IL peephole optimization/transformations
+        # This is necessary to adapt the frontend code to match
+        # the 65816's conventions (i.e. it sucks calling a function pointer,
+        # so please don't generate AddrOf and then Call, instead CallLiteral)
+        perform_il_peephole(commands)
 
         # Annotate calling convention in LoadArg commands
         # Must be done before generate_graph

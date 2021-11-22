@@ -444,7 +444,10 @@ def match_number_string(token_repr):
 
     """
     token_str = chunk_to_str(token_repr)
-    return token_str if token_str.isdigit() else None
+    try:
+        return token_str if int(token_str, base=0) else None
+    except ValueError:
+        return None
 
 
 def match_identifier_name(token_repr):

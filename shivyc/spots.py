@@ -56,6 +56,14 @@ class Spot:
         if chunk or count:
             raise NotImplementedError("cannot shift this spot type")
         return self
+    
+    def get_manifest(self):
+        """Transform the spot given into a LiteralSpot.
+
+        This doesn't make sense for registers, only for MemSpots with no
+        offset or count, or LiteralSpots (for which this is `return self`).
+        """
+        raise NotImplementedError("cannot transform this spot type to manifest")
 
     def __repr__(self):  # pragma: no cover
         return str(self.detail)
@@ -71,6 +79,33 @@ class Spot:
         """Hash based on type and detail."""
         return hash((self.__class__.__name__, self.detail))
 
+class LiteralSpot(Spot):
+    """Spot representing a literal value.
+
+    This is a bit of a hack, since a literal value isn't /really/ a storage
+    spot. The value attribute is the integer representation of the value of
+    this literal.
+    """
+
+    def __init__(self, value):
+        super().__init__(value)
+        self.value = value
+
+    def asm_str(self, size):  # noqa D102
+        return str(self.value)
+
+    def shift(self, chunk, count=None):  # noqa D102
+        """Return a new literal spot shifted relative to this one.
+
+        chunk - A Python integer representing the size of each chunk of offset
+        count - Must be none
+        """
+        assert count is None
+
+        return LiteralSpot(f'({self.asm_str(0)}>>{8*chunk})')
+    
+    def get_manifest(self):
+        return self
 
 class RegSpot(Spot):
     """Spot representing a machine register."""
@@ -155,6 +190,13 @@ class MemSpot(Spot):
 
         size_desc = self.size_map.get(size, "")
         return f"{size_desc}[{final}]"
+    
+    def get_manifest(self) -> Spot:
+        assert isinstance(self.base, str), 'get_manifest can only be called on basic MemSpots'
+        assert self.offset == 0, 'get_manifest can only be called on basic MemSpots'
+        assert self.chunk == 0, 'get_manifest can only be called on basic MemSpots'
+        assert self.count is None, 'get_manifest can only be called on basic MemSpots'
+        return LiteralSpot(self.base)
 
     def rbp_offset(self):  # noqa D102
         if self.base == DP:
@@ -194,22 +236,6 @@ class ParentDPRelativeSpot(Spot):
 
     def asm_str(self, size):  # noqa D102
         return str(f"PARENT_DP+{self.offset}")
-    
-
-class LiteralSpot(Spot):
-    """Spot representing a literal value.
-
-    This is a bit of a hack, since a literal value isn't /really/ a storage
-    spot. The value attribute is the integer representation of the value of
-    this literal.
-    """
-
-    def __init__(self, value):
-        super().__init__(value)
-        self.value = value
-
-    def asm_str(self, size):  # noqa D102
-        return str(self.value)
 
 A = RegSpot("A")
 X = RegSpot("X")
@@ -225,3 +251,5 @@ DP02 = MemSpot(DP, offset=0x02)
 DP04 = MemSpot(DP, offset=0x04)
 DP06 = MemSpot(DP, offset=0x06)
 DP0A = MemSpot(DP, offset=0x0A)
+
+Zero = LiteralSpot(0)

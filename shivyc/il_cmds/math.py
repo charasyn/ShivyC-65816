@@ -186,7 +186,7 @@ class Mult(ILCommand):
         arg1_spot = spotmap[self.arg1]
         arg2_spot = spotmap[self.arg2]
 
-        print(f'Mult{self.impl} arg1:{arg1_spot} arg2:{arg2_spot} out:{spotmap[self.output]}')
+        # print(f'Mult{self.impl} arg1:{arg1_spot} arg2:{arg2_spot} out:{spotmap[self.output]}')
 
         impl_to_function = {
             self.MULT32: "MULT32",

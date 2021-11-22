@@ -2,9 +2,11 @@
 
 from typing import List
 import shivyc.asm_cmds as asm_cmds
+from shivyc.ctypes import PointerCType
+from shivyc.il_gen import ILValue
 import shivyc.spots as spots
 from shivyc.il_cmds.base import ILCommand
-from shivyc.spots import LiteralSpot, Spot
+from shivyc.spots import LiteralSpot, MemSpot, Spot
 
 
 class Label(ILCommand):
@@ -139,7 +141,7 @@ class Return(ILCommand):
 class Call(ILCommand):
     """Call a given function.
 
-    func - Pointer to function
+    func - Pointer to function, or function itself
     args - Arguments of the function, in left-to-right order. Must match the
     parameter types the function expects.
     ret - If function has non-void return type, IL value to save the return
@@ -150,9 +152,14 @@ class Call(ILCommand):
         self.func = func
         self.args = args
         self.ret = ret
-        self.void_return = self.func.ctype.arg.ret.is_void()
+        self.func_is_ptr = isinstance(self.func.ctype, PointerCType)
+        if self.func_is_ptr:
+            self.func_ctype = self.func.ctype.arg
+        else:
+            self.func_ctype = self.func.ctype
+        self.void_return = self.func_ctype.ret.is_void()
         if not self.void_return:
-            if self.func.ctype.arg.ret.size <= 2:
+            if self.func_ctype.ret.size <= 2:
                 self.ret_spot = spots.A
             else:
                 self.ret_spot = spots.MemSpot(spots.DP, 0x06)
@@ -176,7 +183,6 @@ class Call(ILCommand):
         prefs = {} if self.void_return else {self.ret: [self.ret_spot]}
         for arg, reg in zip(self.args, self.arg_spots):
             prefs[arg] = [reg]
-        prefs[self.func] = [spots.MemSpot(spots.DP, 0x06)]
         return prefs
 
     def abs_spot_conf(self): # noqa D102
@@ -193,23 +199,79 @@ class Call(ILCommand):
     def make_asm(self, spotmap, home_spots, get_reg, asm_code, **kwargs): # noqa D102
         func_spot = spotmap[self.func]
 
-        func_size = self.func.ctype.size
-        ret_size = self.func.ctype.arg.ret.size
+        ret_size = self.func_ctype.ret.size
 
-        # Check if function pointer spot will be clobbered by moving the
-        # arguments into the correct registers.
-        if spotmap[self.func] in self.arg_spots:
-            # Get a register which isn't one of the unallowed registers.
-            r = get_reg([], self.arg_spots)
-            asm_code.add(asm_cmds.Mov(r, spotmap[self.func], func_size))
-            func_spot = r
+        args_with_spots = list(zip(self.args, self.arg_spots))
+        reg_args = filter(lambda _, spot:     isinstance(spot, spots.RegSpot), args_with_spots)
+        mem_args = filter(lambda _, spot: not isinstance(spot, spots.RegSpot), args_with_spots)
+
+        # Determine if we will need to do any memory copies.
+        if mem_args and any(True for arg, reg in mem_args if spotmap[arg] != reg):
+            # Determine which register to use to copy
+            copy_reg = None
+            preserve_y = False
+            if spots.Y not in self.arg_spots:
+                copy_reg = spots.Y
+            else:
+                # Registers are supposed to be passed. Look for one that will be overwritten later.
+                for arg, dst_spot in reg_args:
+                    src_spot = spotmap[arg]
+                    if src_spot != dst_spot:
+                        # This reg doesn't hold it's intended value currently! Let's use it to copy.
+                        copy_reg = dst_spot
+                        break
+            if copy_reg is None:
+                # OK. Let's just save one on the stack.
+                copy_reg = spots.Y
+                preserve_y = True
+            if preserve_y:
+                asm_code.add(asm_cmds.Push(spots.Y, size=2))
+            # Now we should be able to use copy_reg to copy data around.
+            for arg, reg in mem_args:
+                if spotmap[arg] == reg:
+                    continue
+                self._move_any_size(reg, spotmap[arg], arg.ctype.size, copy_reg)
+            # If we had to put Y on the stack, get it back.
+            if preserve_y:
+                asm_code.add(asm_cmds.Pop(spots.Y, size=2))
+
 
         for arg, reg in zip(self.args, self.arg_spots):
             if spotmap[arg] == reg:
                 continue
             asm_code.add(asm_cmds.Mov(reg, spotmap[arg], arg.ctype.size))
-
-        asm_code.add(asm_cmds.Call(func_spot, None, self.func.ctype.size))
+        
+        # We need to use the call trampoline if we are calling a pointer and we don't know it's actual value.
+        # If it's a literal then we don't need to use the trampoline.
+        calling_a_pointer = self.func_is_ptr and not isinstance(func_spot, spots.LiteralSpot)
+        if calling_a_pointer:
+            fp_size = self.func.ctype.size
+            preserve_y = spots.Y in self.arg_spots
+            if fp_size == 2:
+                # This stores the pointer in the trampoline memory, then jumps directly to it.
+                if preserve_y:
+                    asm_code.add(asm_cmds.Push(spots.Y, size=2))
+                asm_code.add(asm_cmds.Mov(spots.Y, func_spot, size=2))
+                asm_code.add(asm_cmds.Mov(spots.MemSpot("TRAMPOLINE_LO"), spots.Y, size=2))
+                if preserve_y:
+                    asm_code.add(asm_cmds.Pop(spots.Y, size=2))
+                # PEA label-1 ; JMP (TRAMPOLINE_LO) ; label:
+                label = asm_code.get_label()
+                asm_code.add(asm_cmds.Push(spots.LiteralSpot(f'({label})-1'), size=2))
+                asm_code.add(asm_cmds.Jmp(spots.MemSpot('TRAMPOLINE_LO'), size=2))
+                asm_code.add(asm_cmds.Label(label))
+            else:
+                if preserve_y:
+                    asm_code.add(asm_cmds.Push(spots.Y, size=2))
+                asm_code.add(asm_cmds.Mov(spots.Y, func_spot, size=2))
+                asm_code.add(asm_cmds.Mov(spots.MemSpot("TRAMPOLINE_LO"), spots.Y, size=2))
+                asm_code.add(asm_cmds.Mov(spots.Y, func_spot.shift(2), size=2))
+                asm_code.add(asm_cmds.Mov(spots.MemSpot("TRAMPOLINE_HI"), spots.Y, size=2))
+                if preserve_y:
+                    asm_code.add(asm_cmds.Pop(spots.Y, size=2))
+                asm_code.add(asm_cmds.Call(spots.LiteralSpot("CALL_TRAMPOLINE"), size=4))
+        else:
+            asm_code.add(asm_cmds.Call(func_spot.get_manifest(), size=self.func.ctype.size))
 
         if not self.void_return and spotmap[self.ret] != self.ret_spot:
             asm_code.add(asm_cmds.Mov(spotmap[self.ret], self.ret_spot, ret_size))

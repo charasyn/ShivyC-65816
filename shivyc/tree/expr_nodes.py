@@ -156,7 +156,7 @@ class Number(_RExprNode):
         This function does not actually make any code in the IL, it just
         returns a LiteralILValue that can be used in IL code by the caller.
         """
-        v = int(str(self.number))
+        v = int(str(self.number), base=0)
 
         if ctypes.int_min <= v <= ctypes.int_max:
             il_value = ILValue(ctypes.integer)

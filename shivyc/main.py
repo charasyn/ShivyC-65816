@@ -87,16 +87,16 @@ def process_c_file(file, args):
     #     for cmd in fcmds:
     #         print(f'  {cmd}')
 
-    for var, varname in symbol_table.names.items():
-        print(f'Var {var}: {varname:16s}', end='')
-        for dn in ["linkage_type", "linkages", "def_state", "storage"]:
-            d = getattr(symbol_table, dn)
-            try:
-                dv = d[var]
-            except KeyError:
-                continue
-            print(f'{dn}={dv} ', end='')
-        print()
+    # for var, varname in symbol_table.names.items():
+    #     print(f'Var {var}: {varname:16s}', end='')
+    #     for dn in ["linkage_type", "linkages", "def_state", "storage"]:
+    #         d = getattr(symbol_table, dn)
+    #         try:
+    #             dv = d[var]
+    #         except KeyError:
+    #             continue
+    #         print(f'{dn}={dv} ', end='')
+    #     print()
 
 
     asm_code = ASMCode()

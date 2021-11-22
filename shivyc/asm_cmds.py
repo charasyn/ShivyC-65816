@@ -5,6 +5,7 @@ inherit from _ASMCommandMultiSize or _JumpCommand instead.
 
 """
 
+import shivyc.spots as spots
 
 class _ASMCommand:
     """Base class for a standard ASMCommand, like `add` or `imul`.
@@ -57,8 +58,11 @@ class _JumpCommand:
 
     name = None
 
-    def __init__(self, target):
-        self.target = target
+    def __init__(self, target, size=None):
+        if isinstance(target, spots.Spot):
+            self.target = target.asm_str(size)
+        else:
+            self.target = target
 
     def __str__(self):
         s = "\t" + self.name + " " + self.target
@@ -193,3 +197,5 @@ class Sal(_ASMCommandMultiSize): name = "sal"  # noqa: D101
 
 
 class Rep(_ASMCommand): name = "rep"  # noqa: D101
+class Sep(_ASMCommand): name = "sep"  # noqa: D101
+class Phk(_ASMCommand): name = "phk"  # noqa: D101
